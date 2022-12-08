@@ -34,20 +34,19 @@ class Attacker(torch.nn.Module):
         diff = (x - original).renorm(p=2, dim=0, maxnorm=eps)
         return torch.clamp(original + diff, 0, 1)
     
-    def get_loss(self,x, target,normalize,custom_loss,criterion):
+    def get_loss(self,x, target,normalize,loss_class):
         if normalize:
             x = self.normalize(x)
-        return custom_loss(self.model, x, target) if custom_loss else criterion(self.model(x), target) 
+        return loss_class.loss(self.model,x,target)
 
-    def forward(self, x, target, eps, step_size, iters, normalize=False, custom_loss=None):
+    def forward(self, x, target, eps, step_size, iters, normalize, loss_class):
         original = x.detach().cuda()
-        criterion = torch.nn.CrossEntropyLoss(reduction='none')
 
         best_loss = [None, None] # loss, input
 
         for _ in range(iters):
             x = x.clone().detach().requires_grad_(True)
-            loss = torch.mean(self.get_loss(x, target,normalize,custom_loss,criterion))
+            loss = torch.mean(self.get_loss(x, target,normalize,loss_class))
 
             grad, = torch.autograd.grad(-loss, [x])
 
@@ -61,7 +60,7 @@ class Attacker(torch.nn.Module):
                     best_loss[1][index] = x[index].clone().detach()
                 x = self.step(original, x, grad, eps, step_size)
                 
-        loss = torch.mean(self.get_loss(x, target,normalize,custom_loss,criterion))
+        loss = torch.mean(self.get_loss(x, target,normalize,loss_class))
         index = -best_loss[0] < -loss
         best_loss[0][index] = loss[index]
         best_loss[1][index] = x[index].clone().detach()
@@ -76,9 +75,9 @@ class AttackerModel(torch.nn.Module):
         self.attacker = Attacker(model, dataset)
         self.dataset = dataset
 
-    def forward(self, input, target, eps, step_size, iters, normalize, custom_loss = None):
+    def forward(self, input, target, eps, step_size, iters, normalize, loss_class):
         self.eval()
-        adv_input = self.attacker(input, target, eps, step_size, iters, normalize, custom_loss)
+        adv_input = self.attacker(input, target, eps, step_size, iters, normalize, loss_class)
         normalized = self.normalizer(adv_input)
         output = self.model(normalized)
         return output, adv_input
